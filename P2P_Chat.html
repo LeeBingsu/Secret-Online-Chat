@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔒 SecureChat - Anonymous P2P Messaging</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { font-family: 'Inter', sans-serif; }
+        
+        body {
+            background: #f8fafc;
+        }
+        
+        @media (prefers-color-scheme: dark) {
+            body {
+                background: #0f172a;
+            }
+        }
+        
+        .message-animation {
+            animation: slideIn 0.3s ease-out;
+        }
+        
+        @keyframes slideIn {
+            0% { opacity: 0; transform: translateY(10px); }
+            100% { opacity: 1; transform: translateY(0); }
+        }
+        
+        .typing-indicator span {
+            animation: blink 1.4s infinite both;
+        }
+        .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+        .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+        
+        @keyframes blink {
+            0%, 100% { opacity: 0.3; }
+            50% { opacity: 1; }
+        }
+        
+        .destruct-timer {
+            font-size: 11px;
+        }
+
+        .chat-scroll::-webkit-scrollbar { width: 4px; }
+        .chat-scroll::-webkit-scrollbar-track { background: transparent; }
+        .chat-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        
+        @media (prefers-color-scheme: dark) {
+            .chat-scroll::-webkit-scrollbar-thumb { background: #475569; }
+        }
+
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .copy-btn:active {
+            transform: scale(0.95);
+        }
+    </style>
+</head>
+<body class="bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100">
+    
+    <div class="h-screen flex flex-col max-w-2xl mx-auto">
+        <!-- Header -->
+        <header class="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 px-4 py-3">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-full bg-emerald-500 flex items-center justify-center">
+                        <svg class="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <h1 class="text-lg font-semibold text-slate-800 dark:text-white">SecureChat</h1>
+                        <p class="text-xs text-slate-500 dark:text-slate-400">P2P Encrypted</p>
+                    </div>
+                </div>
+                <div class="text-right">
+                    <div class="flex items-center gap-1.5 text-xs font-medium" id="connectionStatus">
+                        <span class="w-2 h-2 bg-amber-500 rounded-full pulse"></span>
+                        <span class="text-amber-600 dark:text-amber-400">Initializing...</span>
+                    </div>
+                    <p class="text-xs text-slate-400 mt-0.5" id="myPeerId">Generating ID...</p>
+                </div>
+            </div>
+        </header>
+        
+        <!-- Connection Panel -->
+        <div class="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 px-4 py-3" id="connectionPanel">
+            <div class="space-y-3">
+                <!-- Your ID -->
+                <div class="flex items-center gap-2">
+                    <span class="text-xs text-slate-500 dark:text-slate-400 w-16">Your ID:</span>
+                    <div class="flex-1 flex items-center gap-2">
+                        <code class="flex-1 bg-slate-100 dark:bg-slate-700 px-3 py-1.5 rounded text-xs font-mono text-slate-700 dark:text-slate-300 truncate" id="myIdDisplay">Loading...</code>
+                        <button onclick="copyMyId()" class="copy-btn px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-xs rounded font-medium transition-colors">
+                            Copy
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Connect to Peer -->
+                <div class="flex items-center gap-2">
+                    <span class="text-xs text-slate-500 dark:text-slate-400 w-16">Connect:</span>
+                    <div class="flex-1 flex items-center gap-2">
+                        <input 
+                            type="text" 
+                            id="peerIdInput" 
+                            placeholder="Enter peer's ID..."
+                            class="flex-1 bg-slate-100 dark:bg-slate-700 border-0 rounded px-3 py-1.5 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        >
+                        <button onclick="connectToPeer()" id="connectBtn" class="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white text-xs rounded font-medium transition-colors">
+                            Connect
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Instructions -->
+                <p class="text-xs text-slate-400 dark:text-slate-500 text-center">
+                    Share your ID with a friend, or enter their ID to connect securely
+                </p>
+            </div>
+        </div>
+
+        <!-- Connected Peer Info (hidden by default) -->
+        <div class="bg-emerald-50 dark:bg-emerald-900/20 border-b border-emerald-200 dark:border-emerald-800 px-4 py-2 hidden" id="connectedPanel">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <span class="w-2 h-2 bg-emerald-500 rounded-full"></span>
+                    <span class="text-xs text-emerald-700 dark:text-emerald-400">Connected to:</span>
+                    <code class="text-xs font-mono text-emerald-800 dark:text-emerald-300" id="connectedPeerId"></code>
+                </div>
+                <button onclick="disconnect()" class="text-xs text-red-500 hover:text-red-600 font-medium">
+                    Disconnect
+                </button>
+            </div>
+        </div>
+        
+        <!-- Security Badges -->
+        <div class="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 px-4 py-2">
+            <div class="flex gap-2 overflow-x-auto pb-1 -mb-1">
+                <span class="flex-shrink-0 px-2.5 py-1 rounded-full bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 text-xs font-medium flex items-center gap-1">
+                    <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+                    WebRTC P2P
+                </span>
+                <span class="flex-shrink-0 px-2.5 py-1 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 text-xs font-medium flex items-center gap-1">
+                    <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"/></svg>
+                    Anonymous
+                </span>
+                <span class="flex-shrink-0 px-2.5 py-1 rounded-full bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 text-xs font-medium flex items-center gap-1">
+                    <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"/></svg>
+                    Auto-Delete: <span id="destructStatus" class="font-semibold">OFF</span>
+                </span>
+                <span class="flex-shrink-0 px-2.5 py-1 rounded-full bg-rose-50 dark:bg-rose-900/30 text-rose-700 dark:text-rose-400 text-xs font-medium flex items-center gap-1">
+                    <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+                    No Server Logs
+                </span>
+            </div>
+        </div>
+        
+        <!-- Chat Messages -->
+        <div id="chatContainer" class="flex-1 overflow-y-auto chat-scroll bg-slate-50 dark:bg-slate-900 px-4 py-4 space-y-3">
+            <!-- Welcome Message -->
+            <div class="text-center py-8" id="welcomeMessage">
+                <div class="inline-block p-3 rounded-full bg-emerald-100 dark:bg-emerald-900/30 mb-3">
+                    <svg class="w-8 h-8 text-emerald-600 dark:text-emerald-400" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M18 10c0 3.866-3.582 7-8 7a8.841 8.841 0 01-4.083-.98L2 17l1.338-3.123C2.493 12.767 2 11.434 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7zM7 9H5v2h2V9zm8 0h-2v2h2V9zM9 9h2v2H9V9z" clip-rule="evenodd"/>
+                    </svg>
+                </div>
+                <h3 class="text-slate-700 dark:text-slate-200 font-semibold mb-1">Peer-to-Peer Secure Chat</h3>
+                <p class="text-slate-500 dark:text-slate-400 text-sm max-w-xs mx-auto">Share your ID or enter a friend's ID to start a private, encrypted conversation.</p>
+            </div>
+        </div>
+        
+        <!-- Message Input Area -->
+        <div class="bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 px-4 py-3">
+            <!-- Options Row -->
+            <div class="flex items-center gap-4 mb-3">
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" id="autoDestruct" class="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-amber-500 focus:ring-amber-500 bg-white dark:bg-slate-700">
+                    <span class="text-xs text-slate-500 dark:text-slate-400">Self-destruct (30s)</span>
+                </label>
+            </div>
+            
+            <!-- Input Row -->
+            <div class="flex gap-2">
+                <div class="flex-1 relative">
+                    <input 
+                        type="text" 
+                        id="messageInput" 
+                        placeholder="Type a secure message..."
+                        disabled
+                        class="w-full bg-slate-100 dark:bg-slate-700 border-0 rounded-full px-4 py-2.5 text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm disabled:opacity-50"
+                    >
+                </div>
+                <button 
+                    id="sendBtn"
+                    disabled
+                    class="w-10 h-10 bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 rounded-full flex items-center justify-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    <svg class="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z"/>
+                    </svg>
+                </button>
+            </div>
+            
+            <!-- Status Row -->
+            <div class="mt-2 flex items-center justify-between text-xs">
+                <span class="typing-indicator hidden text-slate-400" id="typingIndicator">
+                    <span>●</span><span>●</span><span>●</span> Peer is typing...
+                </span>
+                <span id="encryptionStatus" class="text-slate-400 dark:text-slate-500 ml-auto">🔐 Connect to start chatting</span>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Global variables
+        let peer = null;
+        let conn = null;
+        let myPeerId = '';
+
+        // DOM Elements
+        const chatContainer = document.getElementById('chatContainer');
+        const messageInput = document.getElementById('messageInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const autoDestruct = document.getElementById('autoDestruct');
+        const destructStatus = document.getElementById('destructStatus');
+        const typingIndicator = document.getElementById('typingIndicator');
+        const connectionStatus = document.getElementById('connectionStatus');
+        const myIdDisplay = document.getElementById('myIdDisplay');
+        const myPeerIdEl = document.getElementById('myPeerId');
+        const peerIdInput = document.getElementById('peerIdInput');
+        const connectionPanel = document.getElementById('connectionPanel');
+        const connectedPanel = document.getElementById('connectedPanel');
+        const connectedPeerId = document.getElementById('connectedPeerId');
+        const welcomeMessage = document.getElementById('welcomeMessage');
+        const encryptionStatus = document.getElementById('encryptionStatus');
+
+        // Generate random peer ID
+        function generatePeerId() {
+            const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+            let id = 'SC-';
+            for (let i = 0; i < 8; i++) {
+                id += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            return id;
+        }
+
+        // Initialize PeerJS
+        function initPeer() {
+            myPeerId = generatePeerId();
+            
+            peer = new Peer(myPeerId, {
+                debug: 1
+            });
+
+            peer.on('open', (id) => {
+                myPeerId = id;
+                myIdDisplay.textContent = id;
+                myPeerIdEl.textContent = 'ID: ' + id;
+                updateConnectionStatus('ready', 'Ready to connect');
+            });
+
+            peer.on('connection', (connection) => {
+                if (conn) {
+                    connection.close();
+                    return;
+                }
+                conn = connection;
+                setupConnection();
+            });
+
+            peer.on('error', (err) => {
+                console.error('Peer error:', err);
+                if (err.type === 'peer-unavailable') {
+                    showSystemMessage('Peer not found. Check the ID and try again.', 'error');
+                    updateConnectionStatus('ready', 'Ready to connect');
+                } else if (err.type === 'disconnected' || err.type === 'network') {
+                    updateConnectionStatus('error', 'Connection lost');
+                    setTimeout(initPeer, 3000);
+                } else {
+                    showSystemMessage('Connection error: ' + err.type, 'error');
+                }
+            });
+
+            peer.on('disconnected', () => {
+                updateConnectionStatus('warning', 'Reconnecting...');
+                peer.reconnect();
+            });
+        }
+
+        // Connect to a peer
+        function connectToPeer() {
+            const peerId = peerIdInput.value.trim().toUpperCase();
+            if (!peerId) {
+                showSystemMessage('Please enter a peer ID', 'error');
+                return;
+            }
+            if (peerId === myPeerId) {
+                showSystemMessage('You cannot connect to yourself', 'error');
+                return;
+            }
+
+            updateConnectionStatus('connecting', 'Connecting...');
+            
+            conn = peer.connect(peerId, {
+                reliable: true
+            });
+
+            setupConnection();
+        }
+
+        // Setup connection handlers
+        function setupConnection() {
+            conn.on('open', () => {
+                updateConnectionStatus('connected', 'Connected');
+                connectedPeerId.textContent = conn.peer;
+                connectionPanel.classList.add('hidden');
+                connectedPanel.classList.remove('hidden');
+                messageInput.disabled = false;
+                sendBtn.disabled = false;
+                encryptionStatus.textContent = '🔐 End-to-end encrypted';
+                welcomeMessage.innerHTML = `
+                    <div class="inline-block p-3 rounded-full bg-emerald-100 dark:bg-emerald-900/30 mb-3">
+                        <svg class="w-8 h-8 text-emerald-600 dark:text-emerald-400" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                        </svg>
+                    </div>
+                    <h3 class="text-emerald-700 dark:text-emerald-400 font-semibold mb-1">Secure Connection Established</h3>
+                    <p class="text-slate-500 dark:text-slate-400 text-sm max-w-xs mx-auto">You're now chatting securely with <span class="font-mono">${conn.peer}</span></p>
+                `;
+                showSystemMessage('🔒 Secure connection established', 'success');
+            });
+
+            conn.on('data', (data) => {
+                if (data.type === 'message') {
+                    createMessage(data.text, false, data.destruct);
+                } else if (data.type === 'typing') {
+                    showTypingIndicator(data.isTyping);
+                }
+            });
+
+            conn.on('close', () => {
+                handleDisconnect();
+            });
+
+            conn.on('error', (err) => {
+                console.error('Connection error:', err);
+                showSystemMessage('Connection error occurred', 'error');
+            });
+        }
+
+        // Disconnect from peer
+        function disconnect() {
+            if (conn) {
+                conn.close();
+            }
+            handleDisconnect();
+        }
+
+        // Handle disconnection
+        function handleDisconnect() {
+            conn = null;
+            updateConnectionStatus('ready', 'Ready to connect');
+            connectionPanel.classList.remove('hidden');
+            connectedPanel.classList.add('hidden');
+            messageInput.disabled = true;
+            sendBtn.disabled = true;
+            encryptionStatus.textContent = '🔐 Connect to start chatting';
+            showSystemMessage('Disconnected from peer', 'info');
+        }
+
+        // Update connection status indicator
+        function updateConnectionStatus(status, text) {
+            const colors = {
+                ready: { dot: 'bg-emerald-500', text: 'text-emerald-600 dark:text-emerald-400' },
+                connecting: { dot: 'bg-amber-500 pulse', text: 'text-amber-600 dark:text-amber-400' },
+                connected: { dot: 'bg-emerald-500', text: 'text-emerald-600 dark:text-emerald-400' },
+                error: { dot: 'bg-red-500', text: 'text-red-600 dark:text-red-400' },
+                warning: { dot: 'bg-amber-500 pulse', text: 'text-amber-600 dark:text-amber-400' }
+            };
+            const color = colors[status] || colors.ready;
+            connectionStatus.innerHTML = `
+                <span class="w-2 h-2 ${color.dot} rounded-full"></span>
+                <span class="${color.text}">${text}</span>
+            `;
+        }
+
+        // Copy ID to clipboard
+        function copyMyId() {
+            navigator.clipboard.writeText(myPeerId).then(() => {
+                showSystemMessage('ID copied to clipboard!', 'success');
+            }).catch(() => {
+                // Fallback
+                const input = document.createElement('input');
+                input.value = myPeerId;
+                document.body.appendChild(input);
+                input.select();
+                document.execCommand('copy');
+                document.body.removeChild(input);
+                showSystemMessage('ID copied to clipboard!', 'success');
+            });
+        }
+
+        // Show system message
+        function showSystemMessage(text, type = 'info') {
+            const colors = {
+                info: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400',
+                success: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400',
+                error: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
+            };
+            
+            const msgDiv = document.createElement('div');
+            msgDiv.className = 'message-animation text-center';
+            msgDiv.innerHTML = `
+                <span class="inline-block px-3 py-1.5 rounded-full text-xs font-medium ${colors[type] || colors.info}">${text}</span>
+            `;
+            chatContainer.appendChild(msgDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+
+            // Auto remove after 5 seconds
+            setTimeout(() => {
+                msgDiv.style.transition = 'opacity 0.3s';
+                msgDiv.style.opacity = '0';
+                setTimeout(() => msgDiv.remove(), 300);
+            }, 5000);
+        }
+
+        // Show typing indicator
+        function showTypingIndicator(isTyping) {
+            if (isTyping) {
+                typingIndicator.classList.remove('hidden');
+            } else {
+                typingIndicator.classList.add('hidden');
+            }
+        }
+
+        // Create chat message
+        function createMessage(text, isSent = true, shouldDestruct = false) {
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `message-animation flex ${isSent ? 'justify-end' : 'justify-start'}`;
+            
+            const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            
+            const bubbleClass = isSent 
+                ? 'bg-emerald-500 text-white rounded-2xl rounded-br-md' 
+                : 'bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 rounded-2xl rounded-bl-md shadow-sm';
+            
+            const metaClass = isSent 
+                ? 'text-emerald-100' 
+                : 'text-slate-400 dark:text-slate-500';
+            
+            msgDiv.innerHTML = `
+                <div class="max-w-[85%] sm:max-w-[70%]">
+                    <div class="${bubbleClass} px-4 py-2.5">
+                        <p class="text-sm break-words">${escapeHtml(text)}</p>
+                    </div>
+                    <div class="flex items-center gap-2 mt-1 px-1 ${isSent ? 'justify-end' : 'justify-start'}">
+                        <span class="text-xs ${metaClass}">${time}</span>
+                        <svg class="w-3 h-3 ${isSent ? 'text-emerald-200' : 'text-emerald-500'}" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/>
+                        </svg>
+                    </div>
+                    ${shouldDestruct ? `<div class="destruct-timer mt-1 px-1 text-amber-500 dark:text-amber-400 ${isSent ? 'text-right' : 'text-left'}">Self-destructs in <span class="countdown font-medium">30</span>s</div>` : ''}
+                </div>
+            `;
+            
+            chatContainer.appendChild(msgDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+            
+            // Self-destruct functionality
+            if (shouldDestruct) {
+                let seconds = 30;
+                const countdown = msgDiv.querySelector('.countdown');
+                const timer = setInterval(() => {
+                    seconds--;
+                    if (countdown) countdown.textContent = seconds;
+                    if (seconds <= 0) {
+                        clearInterval(timer);
+                        msgDiv.style.transition = 'all 0.3s ease';
+                        msgDiv.style.opacity = '0';
+                        msgDiv.style.transform = 'scale(0.95)';
+                        setTimeout(() => msgDiv.remove(), 300);
+                    }
+                }, 1000);
+            }
+        }
+
+        // Escape HTML to prevent XSS
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Send message
+        function sendMessage() {
+            const text = messageInput.value.trim();
+            if (!text || !conn) return;
+            
+            const shouldDestruct = autoDestruct.checked;
+            
+            // Send to peer
+            conn.send({
+                type: 'message',
+                text: text,
+                destruct: shouldDestruct
+            });
+            
+            // Display locally
+            createMessage(text, true, shouldDestruct);
+            messageInput.value = '';
+            
+            // Send typing stopped
+            conn.send({ type: 'typing', isTyping: false });
+        }
+
+        // Auto destruct toggle
+        autoDestruct.addEventListener('change', () => {
+            destructStatus.textContent = autoDestruct.checked ? '30s' : 'OFF';
+        });
+
+        // Send button click
+        sendBtn.addEventListener('click', sendMessage);
+
+        // Enter key to send
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+
+        // Typing indicator
+        let typingTimeout;
+        messageInput.addEventListener('input', () => {
+            if (conn) {
+                conn.send({ type: 'typing', isTyping: true });
+                clearTimeout(typingTimeout);
+                typingTimeout = setTimeout(() => {
+                    if (conn) conn.send({ type: 'typing', isTyping: false });
+                }, 1000);
+            }
+        });
+
+        // Connect on enter in peer ID input
+        peerIdInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') connectToPeer();
+        });
+
+        // Initialize on page load
+        initPeer();
+    </script>
+</body>
+</html>
